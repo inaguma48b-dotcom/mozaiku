@@ -1255,6 +1255,7 @@ function faceReady(){
 
 /* 顔は「原画」から探す。既にモザイクを掛けた後だと検出できなくなるため。 */
 function detectFaces(src, w, h, qthresh){
+  if(!faceReady()) throw new Error('顔検出データが読み込まれていません');
   const d = src.getContext('2d').getImageData(0,0,w,h).data;
   const gray = new Uint8Array(w*h);
   for(let i=0, p=0; i<gray.length; i++, p+=4)
