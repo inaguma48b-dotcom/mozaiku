@@ -10,7 +10,8 @@
 <link rel="icon" href="./icons/icon-192.png">
 <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<!-- black-translucent だと本文がステータスバーの下に潜り込むため default にする -->
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <style>
   :root{
     --bg:#14161a; --panel:#1c1f26; --panel2:#242833; --line:#333947;
@@ -78,9 +79,11 @@
   .pwrow{display:flex; gap:6px; margin-bottom:7px}
   .pwrow button{padding:8px 9px; flex:none}
 
-  .canvasWrap{flex:1; min-width:0; display:flex; flex-direction:column}
+  /* min-height:0 が無いと flex の既定 min-height:auto で中身がはみ出す */
+  .canvasWrap{flex:1; min-width:0; min-height:0; display:flex; flex-direction:column}
   .stage{flex:1; min-height:0; overflow:auto; background:#0d0f12; display:flex; padding:20px}
   .stage.panning{cursor:grabbing}
+  #view[hidden]{display:none}          /* display:block が hidden 属性に勝ってしまうため明示 */
   #view{
     display:block; margin:auto; touch-action:none; cursor:crosshair;
     background:
@@ -91,8 +94,10 @@
   }
   .stage.panning #view{cursor:grabbing}
   #drop{
-    margin:auto; text-align:center; color:var(--dim); padding:56px 30px;
-    border:2px dashed var(--line); border-radius:14px; max-width:460px;
+    margin:auto; flex:none;            /* flex子として潰れるのを防ぐ */
+    text-align:center; color:var(--dim); padding:56px 30px;
+    border:2px dashed var(--line); border-radius:14px;
+    width:min(460px, 100%); max-width:460px;
   }
   #drop h2{color:var(--fg); font-size:19px; margin:0 0 10px}
   #drop p{margin:6px 0; line-height:1.7}
@@ -158,9 +163,13 @@
     aside{width:auto; border-right:none; border-top:1px solid var(--line); max-height:40vh}
     .stage{padding:8px}
     header{gap:6px; padding:6px 8px}
-    header button, header label.btn, header select{padding:8px 10px}
+    header button, header label.btn, header select{padding:8px 10px; font-size:12px}
     .logo{display:none}
-    #toasts{bottom:auto; top:70px}
+    /* 拡大縮小はピンチ操作でできるので、ヘッダーの行数を減らす */
+    #zoomIn, #zoomOut, #zoom100{display:none}
+    #drop{padding:28px 18px}
+    #drop h2{font-size:17px}
+    #toasts{bottom:auto; top:96px}
     .thumb{width:52px; height:52px}
   }
 </style>
