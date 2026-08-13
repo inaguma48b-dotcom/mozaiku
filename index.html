@@ -94,14 +94,21 @@
   }
   .stage.panning #view{cursor:grabbing}
   #drop{
-    margin:auto; flex:none;            /* flex子として潰れるのを防ぐ */
+    display:block; margin:auto; flex:none;   /* flex子として潰れるのを防ぐ */
     text-align:center; color:var(--dim); padding:56px 30px;
     border:2px dashed var(--line); border-radius:14px;
-    width:min(460px, 100%); max-width:460px;
+    width:min(460px, 100%); max-width:460px; cursor:pointer;
   }
+  #drop:hover{border-color:#4a5266}
   #drop h2{color:var(--fg); font-size:19px; margin:0 0 10px}
   #drop p{margin:6px 0; line-height:1.7}
   #drop .kbd{background:var(--panel2); border:1px solid var(--line); border-radius:4px; padding:1px 6px; font-size:12px}
+  .dropBtn{
+    display:inline-block; margin-top:16px; padding:12px 28px;
+    background:var(--accent2); color:#fff; border-radius:8px;
+    font-size:15px; font-weight:600; pointer-events:none;
+  }
+  #drop:hover .dropBtn{background:var(--accent)}
 
   /* フィルムストリップ */
   #strip{
@@ -320,14 +327,15 @@
 
     <div class="canvasWrap">
       <div class="stage" id="stage">
-        <div id="drop">
-          <h2>画像をドロップ</h2>
-          <p>複数枚まとめて放り込めます／<span class="kbd">Ctrl</span>+<span class="kbd">V</span> で貼り付け</p>
+        <label id="drop" for="file">
+          <h2 id="dropTitle">画像をドロップ</h2>
+          <p id="dropHow">複数枚まとめて放り込めます／<span class="kbd">Ctrl</span>+<span class="kbd">V</span> で貼り付け</p>
+          <span class="dropBtn">写真を選ぶ</span>
           <p style="font-size:12px; margin-top:18px">
             画像はブラウザ内だけで処理され、どこにも送信されません。<br>
             保存時に Exif（撮影日時・GPS等）は自動的に削除されます。
           </p>
-        </div>
+        </label>
         <canvas id="view" hidden></canvas>
       </div>
       <div id="strip"></div>
@@ -403,6 +411,14 @@ const shrinkPrefs = (() => {
 })();
 function saveShrinkPrefs(){
   try{ localStorage.setItem('mosaic.shrink', JSON.stringify(shrinkPrefs)); }catch(_){}
+}
+
+/* スマホにはドラッグ&ドロップも Ctrl+V も無いので、案内文を端末に合わせる */
+if(isSmallDevice){
+  $('dropTitle').textContent = '写真を選んでください';
+  $('dropHow').textContent   = '複数枚まとめて選べます';
+  $('file').setAttribute('multiple','');
+  document.querySelector('.dropBtn').textContent = '写真を選ぶ';
 }
 
 /* ---------- 通知 ---------- */
