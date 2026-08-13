@@ -1,0 +1,11 @@
+# 顔検出の動作確認用画像。第三者の写真なので再配布しない（node tools/fetch-pico.js で取得できる）
+tools/testdata/
+
+# カスケードの生バイナリ。アプリが読むのは base64 版の vendor/pico-cascade.js なので不要
+# （fetch-pico.js を実行すれば再生成される）
+vendor/facefinder
+
+# OS が作る余計なファイル
+Thumbs.db
+.DS_Store
+desktop.ini

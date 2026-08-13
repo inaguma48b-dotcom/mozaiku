@@ -1,0 +1,1563 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>モザイクツール — ブラウザ内で完結する画像加工</title>
+<meta name="description" content="画像を送信せずブラウザ内だけでモザイク・ぼかし・黒塗り。パスワードで元に戻せる可逆モザイク、複数枚の一括処理に対応。">
+<meta name="theme-color" content="#1c1f26">
+<link rel="manifest" href="./manifest.json">
+<link rel="icon" href="./icons/icon-192.png">
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<style>
+  :root{
+    --bg:#14161a; --panel:#1c1f26; --panel2:#242833; --line:#333947;
+    --fg:#e8eaf0; --dim:#9aa3b5; --accent:#4c8dff; --accent2:#2f6fe0;
+    --good:#5ec98a; --warn:#e8b13d; --bad:#ff6b6b;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font-family:"Helvetica Neue",Arial,"Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif;
+    font-size:14px; overflow:hidden; overscroll-behavior:none;
+    -webkit-user-select:none; user-select:none;
+  }
+  #app{display:flex; flex-direction:column; height:100vh; height:100dvh}
+
+  header{
+    display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+    padding:8px 12px; background:var(--panel); border-bottom:1px solid var(--line);
+    padding-top:max(8px, env(safe-area-inset-top));
+  }
+  .logo{font-weight:700; letter-spacing:.04em; margin-right:6px; white-space:nowrap}
+  .logo span{color:var(--accent)}
+  .spacer{flex:1}
+
+  button, select, label.btn, input[type=password], input[type=text]{
+    background:var(--panel2); color:var(--fg); border:1px solid var(--line);
+    border-radius:7px; padding:7px 12px; cursor:pointer; font-size:13px;
+    font-family:inherit; line-height:1.2; white-space:nowrap;
+  }
+  button:hover:not(:disabled), label.btn:hover{border-color:#4a5266; background:#2c3140}
+  button:disabled{opacity:.35; cursor:default}
+  button.primary{background:var(--accent2); border-color:var(--accent2); color:#fff}
+  button.primary:hover{background:var(--accent); border-color:var(--accent)}
+  button.ghost{background:transparent}
+  input[type=file]{display:none}
+  input[type=password], input[type=text].pw{cursor:text; width:100%; padding:8px 10px}
+  input:focus{outline:none; border-color:var(--accent)}
+  #install{display:none}
+  #install.on{display:inline-block}
+
+  main{flex:1; display:flex; min-height:0}
+  aside{
+    width:246px; flex:none; background:var(--panel); border-right:1px solid var(--line);
+    padding:14px; overflow:auto; padding-bottom:max(14px, env(safe-area-inset-bottom));
+  }
+  .group{margin-bottom:20px}
+  .group h3{margin:0 0 8px; font-size:11px; color:var(--dim); letter-spacing:.12em; font-weight:600}
+  .seg{display:flex; flex-wrap:wrap; gap:6px}
+  .seg button{flex:1 1 calc(50% - 3px); text-align:center; padding:9px 4px}
+  .seg button.on{background:var(--accent2); border-color:var(--accent2); color:#fff}
+  .wide{width:100%; margin-top:6px}
+
+  .slider{margin-top:12px}
+  .slider .row{display:flex; justify-content:space-between; margin-bottom:5px; font-size:12px}
+  .slider .row b{color:var(--accent); font-weight:600}
+  input[type=range]{width:100%; accent-color:var(--accent)}
+
+  .check{display:flex; align-items:flex-start; gap:8px; cursor:pointer; line-height:1.5; font-size:13px}
+  .check input{margin-top:2px; accent-color:var(--accent); cursor:pointer; flex:none}
+  .note{font-size:11.5px; color:var(--dim); line-height:1.7; margin-top:8px}
+  .note.warn{color:var(--warn)}
+  #revBody{margin-top:10px; display:none}
+  #revBody.open{display:block}
+  .pwrow{display:flex; gap:6px; margin-bottom:7px}
+  .pwrow button{padding:8px 9px; flex:none}
+
+  .canvasWrap{flex:1; min-width:0; display:flex; flex-direction:column}
+  .stage{flex:1; min-height:0; overflow:auto; background:#0d0f12; display:flex; padding:20px}
+  .stage.panning{cursor:grabbing}
+  #view{
+    display:block; margin:auto; touch-action:none; cursor:crosshair;
+    background:
+      linear-gradient(45deg,#2a2d33 25%,transparent 25%,transparent 75%,#2a2d33 75%),
+      linear-gradient(45deg,#2a2d33 25%,#1a1c20 25%,#1a1c20 75%,#2a2d33 75%);
+    background-size:20px 20px; background-position:0 0,10px 10px;
+    box-shadow:0 6px 30px rgba(0,0,0,.6);
+  }
+  .stage.panning #view{cursor:grabbing}
+  #drop{
+    margin:auto; text-align:center; color:var(--dim); padding:56px 30px;
+    border:2px dashed var(--line); border-radius:14px; max-width:460px;
+  }
+  #drop h2{color:var(--fg); font-size:19px; margin:0 0 10px}
+  #drop p{margin:6px 0; line-height:1.7}
+  #drop .kbd{background:var(--panel2); border:1px solid var(--line); border-radius:4px; padding:1px 6px; font-size:12px}
+
+  /* フィルムストリップ */
+  #strip{
+    display:none; gap:8px; padding:8px 10px; background:var(--panel);
+    border-top:1px solid var(--line); overflow-x:auto; align-items:center; flex:none;
+  }
+  #strip.on{display:flex}
+  .thumb{
+    position:relative; flex:none; width:64px; height:64px; padding:0; overflow:hidden;
+    border-radius:8px; border:2px solid var(--line); background:#0d0f12; cursor:pointer;
+  }
+  .thumb img{width:100%; height:100%; object-fit:cover; display:block}
+  .thumb.on{border-color:var(--accent)}
+  .thumb .badge{
+    position:absolute; right:3px; top:3px; width:9px; height:9px; border-radius:50%;
+    background:var(--good); box-shadow:0 0 0 2px #0d0f12;
+  }
+  .thumb .idx{
+    position:absolute; left:0; bottom:0; background:rgba(0,0,0,.66); color:#fff;
+    font-size:10px; padding:1px 4px; border-top-right-radius:5px;
+  }
+  #stripInfo{flex:none; color:var(--dim); font-size:12px; padding-left:4px; white-space:nowrap}
+
+  footer{
+    padding:6px 12px; background:var(--panel); border-top:1px solid var(--line);
+    font-size:12px; color:var(--dim); display:flex; gap:14px; flex-wrap:wrap; align-items:center;
+    padding-bottom:max(6px, env(safe-area-inset-bottom));
+  }
+  footer .ok{color:var(--good)}
+  #embedded{color:var(--accent); display:none}
+  #embedded.on{display:inline}
+  #offline{color:var(--good); display:none}
+  #offline.on{display:inline}
+
+  #toasts{position:fixed; left:50%; transform:translateX(-50%); bottom:56px; z-index:60;
+    display:flex; flex-direction:column; gap:8px; align-items:center; pointer-events:none}
+  .toast{
+    background:#2b303d; border:1px solid var(--line); border-left:3px solid var(--accent);
+    color:var(--fg); padding:10px 16px; border-radius:8px; font-size:13px; max-width:min(90vw,460px);
+    box-shadow:0 8px 24px rgba(0,0,0,.5); opacity:0; transform:translateY(8px);
+    transition:opacity .22s, transform .22s; line-height:1.6; white-space:pre-line;
+  }
+  .toast.in{opacity:1; transform:none}
+  .toast.good{border-left-color:var(--good)}
+  .toast.bad{border-left-color:var(--bad)}
+  .toast.warn{border-left-color:var(--warn)}
+
+  #busy{position:fixed; inset:0; background:rgba(10,12,15,.82); z-index:70;
+    display:none; align-items:center; justify-content:center; flex-direction:column; gap:14px}
+  #busy.on{display:flex}
+  #busy .ring{width:38px; height:38px; border:3px solid var(--line); border-top-color:var(--accent);
+    border-radius:50%; animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  body.dragover #drop{border-color:var(--accent); color:var(--accent)}
+
+  @media (max-width:760px){
+    main{flex-direction:column-reverse}
+    aside{width:auto; border-right:none; border-top:1px solid var(--line); max-height:40vh}
+    .stage{padding:8px}
+    header{gap:6px; padding:6px 8px}
+    header button, header label.btn, header select{padding:8px 10px}
+    .logo{display:none}
+    #toasts{bottom:auto; top:70px}
+    .thumb{width:52px; height:52px}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <header>
+    <div class="logo">MOSAIC<span>.</span></div>
+    <label class="btn" for="file">画像を開く</label>
+    <input type="file" id="file" accept="image/*" multiple>
+    <input type="file" id="keyfile" accept=".mkey">
+    <button id="undo" disabled title="Ctrl+Z">戻す</button>
+    <button id="redo" disabled title="Ctrl+Y">やり直し</button>
+    <button id="peek" disabled title="押している間だけ原画を表示（P）">原画</button>
+    <button id="reset" disabled>全消去</button>
+    <div class="spacer"></div>
+    <button id="install" class="ghost">インストール</button>
+    <button id="zoomOut" disabled>−</button>
+    <button id="zoomFit" disabled>フィット</button>
+    <button id="zoom100" disabled>100%</button>
+    <button id="zoomIn" disabled>＋</button>
+    <select id="format" title="保存形式">
+      <option value="png">PNG（推奨）</option>
+      <option value="jpeg">JPEG（軽量）</option>
+    </select>
+    <button id="save" class="primary" disabled title="Ctrl+S">保存</button>
+    <button id="saveAll" class="primary" disabled style="display:none">全部保存(ZIP)</button>
+  </header>
+
+  <main>
+    <aside>
+      <div class="group">
+        <h3>ツール</h3>
+        <div class="seg" id="tools">
+          <button data-tool="brush" class="on">ブラシ</button>
+          <button data-tool="rect">矩形</button>
+        </div>
+      </div>
+
+      <div class="group">
+        <h3>効果</h3>
+        <div class="seg" id="effects">
+          <button data-effect="mosaic" class="on">モザイク</button>
+          <button data-effect="blur">ぼかし</button>
+          <button data-effect="fill">黒塗り</button>
+          <button data-effect="erase">消しゴム</button>
+        </div>
+
+        <div class="slider">
+          <div class="row"><span id="strengthLabel">ブロックサイズ</span><b id="strengthVal">16 px</b></div>
+          <input type="range" id="strength" min="4" max="80" value="16">
+        </div>
+
+        <div class="slider" id="brushRow">
+          <div class="row"><span>ブラシの太さ</span><b id="brushVal">60 px</b></div>
+          <input type="range" id="brush" min="8" max="400" value="60">
+        </div>
+
+        <button id="applyAll" class="wide" disabled>画像全体に適用</button>
+      </div>
+
+      <div class="group" id="faceGroup">
+        <h3>顔の自動検出</h3>
+        <button id="hideFaces" class="wide" style="margin-top:0" disabled>顔を検出して隠す</button>
+        <div class="slider">
+          <div class="row"><span>検出の厳しさ</span><b id="faceSensVal">標準</b></div>
+          <input type="range" id="faceSens" min="0" max="4" step="1" value="2">
+        </div>
+        <div class="note" id="faceNote">
+          いま選んでいる効果で、検出した顔を隠します。取りこぼしは手動で追加してください。
+        </div>
+      </div>
+
+      <div class="group" id="batchGroup" style="display:none">
+        <h3>複数枚</h3>
+        <button id="hideFacesAll" class="wide" style="margin-top:0" disabled>全画像の顔を検出して隠す</button>
+        <button id="applyRectsToAll" class="wide" disabled>矩形の加工を全画像へ複製</button>
+        <button id="removeItem" class="wide">この画像を一覧から外す</button>
+        <div class="note">
+          「複製」は矩形ツールでの加工だけを、同じサイズの画像の同じ座標へ適用します。
+          スクリーンショットの決まった位置を隠す用途向けです。
+        </div>
+      </div>
+
+      <div class="group">
+        <h3>読み込み</h3>
+        <label class="check">
+          <input type="checkbox" id="autoShrink">
+          <span>大きい画像を自動で縮小</span>
+        </label>
+        <div class="slider" id="shrinkRow">
+          <div class="row"><span>長辺の上限</span><b id="shrinkVal">2000 px</b></div>
+          <input type="range" id="shrinkMax" min="1200" max="4000" step="200" value="2000">
+        </div>
+        <div class="note" id="shrinkNote">
+          スマホは大きな写真でメモリ不足になりやすいため、初期状態では携帯・タブレットのみ有効です。
+          復元データ入りの画像は座標がずれるので縮小しません。
+        </div>
+      </div>
+
+      <div class="group">
+        <h3>可逆モザイク</h3>
+        <label class="check">
+          <input type="checkbox" id="reversible">
+          <span>パスワードで元に戻せるようにする</span>
+        </label>
+
+        <div id="revBody">
+          <div class="pwrow">
+            <input type="password" id="pw" class="pw" placeholder="パスワード（4文字以上）" autocomplete="new-password">
+            <button id="pwToggle" title="表示 / 非表示">👁</button>
+          </div>
+          <input type="password" id="pw2" class="pw" placeholder="パスワード（確認）" autocomplete="new-password">
+          <label class="check" style="margin-top:8px">
+            <input type="checkbox" id="sidecar">
+            <span>鍵データを別ファイル(.mkey)にも保存</span>
+          </label>
+          <div class="note warn">
+            SNS等にアップすると画像が再圧縮され、埋め込んだ復元データは消えます。
+            ファイルを直接受け渡す用途で使ってください。
+          </div>
+          <div class="note">忘れたパスワードは復旧できません。保存形式はPNG固定になります。</div>
+        </div>
+      </div>
+
+      <div class="group">
+        <h3>復元</h3>
+        <button id="restore" class="wide" disabled style="margin-top:0">モザイクを解除</button>
+        <div class="note" id="restoreNote">画像を読み込むと状態を判定します。</div>
+      </div>
+
+      <div class="group">
+        <h3>操作方法</h3>
+        <div style="color:var(--dim); font-size:12px; line-height:1.9">
+          Ctrl+Z / Ctrl+Y … 取り消し<br>
+          Ctrl+S … 保存<br>
+          [ ] … ブラシ太さ<br>
+          B / R … ブラシ / 矩形<br>
+          P（長押し）… 原画を確認<br>
+          ← → … 前後の画像<br>
+          Space+ドラッグ / 中ボタン … 移動<br>
+          Ctrl+ホイール … 拡大縮小<br>
+          2本指 … 移動・ピンチ拡大
+        </div>
+      </div>
+    </aside>
+
+    <div class="canvasWrap">
+      <div class="stage" id="stage">
+        <div id="drop">
+          <h2>画像をドロップ</h2>
+          <p>複数枚まとめて放り込めます／<span class="kbd">Ctrl</span>+<span class="kbd">V</span> で貼り付け</p>
+          <p style="font-size:12px; margin-top:18px">
+            画像はブラウザ内だけで処理され、どこにも送信されません。<br>
+            保存時に Exif（撮影日時・GPS等）は自動的に削除されます。
+          </p>
+        </div>
+        <canvas id="view" hidden></canvas>
+      </div>
+      <div id="strip"></div>
+    </div>
+  </main>
+
+  <footer>
+    <span id="info">画像が読み込まれていません</span>
+    <span id="embedded">🔒 この画像には復元データが含まれています</span>
+    <span class="spacer"></span>
+    <span id="offline">⤓ オフライン利用可</span>
+    <span class="ok">● 完全ローカル処理 / 通信なし</span>
+  </footer>
+</div>
+
+<div id="toasts"></div>
+<div id="busy"><div class="ring"></div><div id="busyText">処理中…</div></div>
+
+<!-- 顔検出（任意）。無くてもアプリ本体はそのまま動く。
+     tools/fetch-pico.js で取得する。MIT / Copyright (c) 2013 Nenad Markus -->
+<script src="./vendor/pico.js"></script>
+<script src="./vendor/pico-cascade.js"></script>
+
+<script>
+"use strict";
+
+/* =========================================================
+   キャンバス構成
+     orig  : 復元の基準となる原画（消しゴム／可逆モザイクの復元元）
+     work  : 現在の編集結果（保存対象）
+     view  : 画面表示用（work + 操作中のガイド線）
+     layer : 操作開始時に生成する「効果適用済みの全面画像」
+     mask  : 操作の塗り範囲
+
+   複数枚は items[] で持ち、表示中の1枚だけを上のキャンバスに展開する。
+   切り替え時に編集結果を PNG Blob へ退避するので、枚数が増えても
+   フル解像度キャンバスがメモリに積み上がらない。
+   ========================================================= */
+const $ = id => document.getElementById(id);
+const mk = (w,h) => { const c=document.createElement('canvas'); c.width=w; c.height=h; return c; };
+
+let W=0, H=0;
+let orig, work, layer, mask;
+let octx, wctx, lctx, mctx;
+const view = $('view');
+const vctx = view.getContext('2d');
+
+const S = {
+  loaded:false, name:'image',
+  tool:'brush', effect:'mosaic',
+  strength:16, brush:60,
+  zoom:1,
+  drawing:false, lastX:0, lastY:0,
+  rect:null, hover:null, peek:false,
+  snapshot:null, sctx:null,
+  dirty:null, opProtect:false,
+  embedded:null,
+  committedRegions:[],   // 画像切り替えで確定済みの復元対象
+};
+const history = { undo:[], redo:[], LIMIT:40 };
+
+/* items: {name, file, workBlob, regions[], rectOps[], thumb, edited, dims, src} */
+const items = [];
+let cur = -1;
+
+/* ---------- 読み込み設定（自動縮小） ----------
+   スマホは1枚の写真で常駐キャンバス4枚＋効果レイヤーを持つため、
+   12MPの写真だと200MB超になりiOSではタブが落ちうる。既定では携帯だけ有効。 */
+const isSmallDevice = matchMedia('(pointer:coarse)').matches || innerWidth < 900;
+const shrinkPrefs = (() => {
+  try{ const s = JSON.parse(localStorage.getItem('mosaic.shrink')); if(s) return s; }catch(_){}
+  return {on: isSmallDevice, max: 2000};
+})();
+function saveShrinkPrefs(){
+  try{ localStorage.setItem('mosaic.shrink', JSON.stringify(shrinkPrefs)); }catch(_){}
+}
+
+/* ---------- 通知 ---------- */
+function toast(msg, kind='info', ms=3600){
+  const el = document.createElement('div');
+  el.className = 'toast ' + kind;
+  el.textContent = msg;
+  $('toasts').appendChild(el);
+  requestAnimationFrame(() => el.classList.add('in'));
+  setTimeout(() => { el.classList.remove('in'); setTimeout(() => el.remove(), 300); }, ms);
+}
+const busy = on => $('busy').classList.toggle('on', !!on);
+const busyText = t => { $('busyText').textContent = t; };
+
+/* ---------- 画像のデコード ---------- */
+function decode(blob){
+  return new Promise((res, rej) => {
+    const url = URL.createObjectURL(blob);
+    const im = new Image();
+    im.onload = () => { URL.revokeObjectURL(url); res(im); };
+    im.onerror = () => { URL.revokeObjectURL(url); rej(new Error('画像を読み込めませんでした')); };
+    im.src = url;
+  });
+}
+function setupCanvases(w,h){
+  W = w; H = h;
+  orig = mk(W,H); octx = orig.getContext('2d', {willReadFrequently:true});
+  work = mk(W,H); wctx = work.getContext('2d', {willReadFrequently:true});
+  mask = mk(W,H); mctx = mask.getContext('2d');
+  S.snapshot = mk(W,H); S.sctx = S.snapshot.getContext('2d', {willReadFrequently:true});
+  view.width = W; view.height = H; view.hidden = false;
+  $('drop').style.display = 'none';
+}
+
+/* ---------- 一覧の操作 ---------- */
+async function addFiles(list){
+  const files = [...list].filter(f => f && f.type.startsWith('image/'));
+  if(!files.length) return;
+  const first = items.length;
+  for(const f of files)
+    items.push({name:f.name || 'image.png', file:f, workBlob:null, regions:[], rectOps:[], thumb:null, edited:false});
+  await switchTo(first);
+  if(files.length > 1) toast(`${files.length}枚を読み込みました。下のサムネイルで切り替えられます。`, 'good');
+}
+
+async function commitCurrent(){
+  const it = items[cur];
+  if(!it || !S.loaded) return;
+  it.regions = protectedRegions();
+  if(history.undo.length || it.edited){
+    it.workBlob = await new Promise(r => work.toBlob(r, 'image/png'));
+    it.edited = true;
+    it.thumb = makeThumb();
+  }
+  history.undo.length = 0; history.redo.length = 0;
+}
+
+async function loadItem(it){
+  // 復元データは「元ファイル」側にだけ入っている。縮小の可否判断より先に調べる
+  S.embedded = null;
+  try{
+    const buf = await it.file.arrayBuffer();
+    if(isPng(buf)) S.embedded = findPngChunk(buf, CHUNK_TYPE);
+  }catch(_){}
+
+  const im = await decode(it.file);
+
+  // 表示サイズは初回に決めて固定する（設定を後から変えても既存の加工とズレないように）
+  if(!it.dims){
+    const ow = im.naturalWidth, oh = im.naturalHeight;
+    it.src = {w:ow, h:oh};
+    const limit = shrinkPrefs.on ? shrinkPrefs.max : 0;
+    if(limit && Math.max(ow,oh) > limit && !S.embedded){
+      const k = limit / Math.max(ow,oh);
+      it.dims = {w: Math.max(1,Math.round(ow*k)), h: Math.max(1,Math.round(oh*k)), shrunk:true};
+    }else{
+      it.dims = {w:ow, h:oh, shrunk:false};
+      it.dims.keptForRestore = !!(limit && Math.max(ow,oh) > limit && S.embedded);
+    }
+  }
+
+  setupCanvases(it.dims.w, it.dims.h);
+  octx.imageSmoothingEnabled = true; octx.imageSmoothingQuality = 'high';
+  octx.drawImage(im, 0, 0, W, H);
+  if(it.workBlob) wctx.drawImage(await decode(it.workBlob), 0, 0);
+  else            wctx.drawImage(orig, 0, 0);
+
+  S.loaded = true;
+  S.name = it.name.replace(/\.[^.]+$/,'');
+  S.committedRegions = it.regions;
+  history.undo.length = 0; history.redo.length = 0;
+  if(!it.thumb) it.thumb = makeThumb();
+}
+
+async function switchTo(i, skipCommit){
+  if(i < 0 || i >= items.length) return;
+  if(!skipCommit && cur >= 0 && cur !== i) await commitCurrent();
+  const prevW = W, prevH = H;
+  cur = i;
+  try{
+    await loadItem(items[i]);
+  }catch(e){
+    toast(`${items[i].name} を読み込めませんでした。`, 'bad');
+    items.splice(i,1); cur = Math.min(i, items.length-1);
+    if(items.length) return switchTo(cur, true);
+    S.loaded = false; view.hidden = true; $('drop').style.display = '';
+    renderStrip(); syncUI(); return;
+  }
+  if(W !== prevW || H !== prevH || S.zoom === 1) fitZoom();
+  renderStrip(); syncUI(); render();
+
+  const d = items[i].dims, s = items[i].src;
+  if(d && d.shrunk && !d.notified){
+    d.notified = true;
+    toast(`メモリ節約のため ${s.w}×${s.h} → ${d.w}×${d.h} に縮小しました。\n左の「読み込み」で変更できます。`, 'warn', 5600);
+  }else if(d && d.keptForRestore && !d.notified){
+    d.notified = true;
+    toast('復元データ入りのため、縮小せず原寸で開きました。', 'warn', 5000);
+  }
+  if(S.embedded) toast('この画像には復元データが含まれています。\nパスワードを入れて「モザイクを解除」できます。', 'good', 6000);
+}
+
+function makeThumb(){
+  const n = 96;
+  const s = Math.min(n/W, n/H);
+  const c = mk(Math.max(1,Math.round(W*s)), Math.max(1,Math.round(H*s)));
+  c.getContext('2d').drawImage(work, 0,0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.7);
+}
+
+function renderStrip(){
+  const strip = $('strip');
+  strip.classList.toggle('on', items.length > 1);
+  $('batchGroup').style.display = items.length > 1 ? '' : 'none';
+  $('saveAll').style.display = items.length > 1 ? '' : 'none';
+  if(items.length <= 1){ strip.innerHTML=''; return; }
+
+  strip.innerHTML = '';
+  items.forEach((it, i) => {
+    const b = document.createElement('button');
+    b.className = 'thumb' + (i===cur ? ' on' : '');
+    b.title = it.name;
+    b.innerHTML = `<img src="${it.thumb || ''}" alt="">`
+      + (it.edited ? '<span class="badge"></span>' : '')
+      + `<span class="idx">${i+1}</span>`;
+    b.onclick = () => switchTo(i);
+    strip.appendChild(b);
+  });
+  const info = document.createElement('span');
+  info.id = 'stripInfo';
+  info.textContent = `${cur+1} / ${items.length} 枚`;
+  strip.appendChild(info);
+}
+
+/* ---------- 表示 ---------- */
+function fitZoom(){
+  const st = $('stage'), pad = 40;
+  setZoom(Math.max(Math.min((st.clientWidth-pad)/W, (st.clientHeight-pad)/H, 1), 0.05));
+}
+function setZoom(z){
+  S.zoom = Math.min(Math.max(z, 0.05), 8);
+  view.style.width  = Math.round(W*S.zoom)+'px';
+  view.style.height = Math.round(H*S.zoom)+'px';
+  syncUI();
+}
+/* 指定した画面上の点を固定したまま拡大縮小する */
+function zoomAt(z, clientX, clientY){
+  const st = $('stage');
+  const r = view.getBoundingClientRect();
+  const ix = (clientX - r.left)/S.zoom, iy = (clientY - r.top)/S.zoom;
+  setZoom(z);
+  const r2 = view.getBoundingClientRect();
+  st.scrollLeft += (r2.left + ix*S.zoom) - clientX;
+  st.scrollTop  += (r2.top  + iy*S.zoom) - clientY;
+}
+
+let raf = 0;
+function render(){
+  if(raf) return;
+  raf = requestAnimationFrame(()=>{
+    raf = 0;
+    if(!S.loaded) return;
+    vctx.clearRect(0,0,W,H);
+    vctx.drawImage(S.peek ? orig : work, 0, 0);
+    if(S.peek) return;
+
+    const px = 1/S.zoom;
+    vctx.save();
+    vctx.lineWidth = Math.max(1.5*px, 1);
+    if(S.tool==='rect' && S.rect){
+      const r = S.rect;
+      vctx.setLineDash([6*px, 4*px]);
+      vctx.strokeStyle = '#fff'; vctx.strokeRect(r.x, r.y, r.w, r.h);
+      vctx.strokeStyle = '#4c8dff'; vctx.lineDashOffset = 5*px; vctx.strokeRect(r.x, r.y, r.w, r.h);
+    }else if(S.tool==='brush' && S.hover){
+      vctx.beginPath();
+      vctx.arc(S.hover.x, S.hover.y, S.brush/2, 0, Math.PI*2);
+      vctx.strokeStyle = 'rgba(0,0,0,.7)'; vctx.lineWidth = 3*px; vctx.stroke();
+      vctx.strokeStyle = '#fff'; vctx.lineWidth = 1.5*px; vctx.stroke();
+    }
+    vctx.restore();
+  });
+}
+
+/* ---------- 効果レイヤー生成 ---------- */
+function buildLayer(){
+  layer = mk(W,H); lctx = layer.getContext('2d');
+  const v = S.strength;
+
+  if(S.effect === 'mosaic'){
+    // 縮小 → 最近傍で拡大。ブロック平均として自然かつ最速
+    const sw = Math.max(1, Math.round(W/v)), sh = Math.max(1, Math.round(H/v));
+    const t = mk(sw,sh), tc = t.getContext('2d');
+    tc.imageSmoothingEnabled = true; tc.imageSmoothingQuality = 'high';
+    tc.drawImage(work, 0,0, sw, sh);
+    lctx.imageSmoothingEnabled = false;
+    lctx.drawImage(t, 0,0,sw,sh, 0,0,W,H);
+
+  }else if(S.effect === 'blur'){
+    lctx.filter = `blur(${(v/2).toFixed(1)}px)`;
+    lctx.drawImage(work,0,0);
+    lctx.filter = 'none';
+    lctx.globalCompositeOperation = 'destination-over'; // 縁のぼけ抜けを埋める
+    lctx.drawImage(work,0,0);
+    lctx.globalCompositeOperation = 'source-over';
+
+  }else if(S.effect === 'fill'){
+    lctx.fillStyle = '#000'; lctx.fillRect(0,0,W,H);
+
+  }else{ // erase
+    lctx.drawImage(orig,0,0);
+  }
+}
+
+/* ---------- 操作の開始 / 確定 / 中断 ---------- */
+function beginOp(){
+  S.sctx.clearRect(0,0,W,H);
+  S.sctx.drawImage(work,0,0);
+  mctx.clearRect(0,0,W,H);
+  S.dirty = null;
+  // 可逆モードで「隠す」操作のときだけ、その範囲を復元対象として記録する
+  S.opProtect = $('reversible').checked && S.effect !== 'erase';
+  buildLayer();
+}
+function endOp(){
+  const d = S.dirty;
+  S.dirty = null;
+  if(!d) return;
+  history.undo.push({
+    x:d.x, y:d.y,
+    before: S.sctx.getImageData(d.x,d.y,d.w,d.h),
+    after:  wctx.getImageData(d.x,d.y,d.w,d.h),
+    protect: S.opProtect
+  });
+  if(history.undo.length > history.LIMIT) history.undo.shift();
+  history.redo.length = 0;
+  if(items[cur]) items[cur].edited = true;
+  syncUI();
+}
+function cancelOp(){                       // 2本指に切り替わったときなど、描きかけを破棄
+  if(!S.drawing) return;
+  S.drawing = false; S.rect = null; S.dirty = null;
+  wctx.clearRect(0,0,W,H); wctx.drawImage(S.snapshot,0,0);
+  render();
+}
+function expandDirty(x,y,w,h){
+  x = Math.max(0, Math.floor(x)); y = Math.max(0, Math.floor(y));
+  const x2 = Math.min(W, Math.ceil(x+w)), y2 = Math.min(H, Math.ceil(y+h));
+  if(x2<=x || y2<=y) return null;
+  const r = {x, y, w:x2-x, h:y2-y};
+  if(!S.dirty) S.dirty = r;
+  else{
+    const nx = Math.min(S.dirty.x, r.x), ny = Math.min(S.dirty.y, r.y);
+    S.dirty = { x:nx, y:ny,
+      w: Math.max(S.dirty.x+S.dirty.w, r.x+r.w) - nx,
+      h: Math.max(S.dirty.y+S.dirty.h, r.y+r.h) - ny };
+  }
+  return r;
+}
+
+/* マスクに描いた範囲だけ layer を work へ転写する */
+function composite(box){
+  if(!box) return;
+  const t = mk(box.w, box.h), tc = t.getContext('2d');
+  tc.drawImage(layer, box.x, box.y, box.w, box.h, 0,0, box.w, box.h);
+  tc.globalCompositeOperation = 'destination-in';
+  tc.drawImage(mask,  box.x, box.y, box.w, box.h, 0,0, box.w, box.h);
+  wctx.drawImage(t, box.x, box.y);
+}
+
+/* ---------- ブラシ ---------- */
+function strokeSegment(x0,y0,x1,y1){
+  const r = S.brush/2;
+  const pad = r + S.strength + 2;
+  const box = expandDirty(Math.min(x0,x1)-pad, Math.min(y0,y1)-pad,
+                          Math.abs(x1-x0)+pad*2, Math.abs(y1-y0)+pad*2);
+  if(!box) return;
+
+  mctx.fillStyle = '#fff';
+  if(S.effect === 'mosaic'){
+    // ブロック単位で塗ると、なぞってもタイルの目が全体で揃う
+    const b = S.strength;
+    const bx0 = Math.max(0, Math.floor((Math.min(x0,x1)-r)/b));
+    const by0 = Math.max(0, Math.floor((Math.min(y0,y1)-r)/b));
+    const bx1 = Math.min(Math.ceil(W/b)-1, Math.floor((Math.max(x0,x1)+r)/b));
+    const by1 = Math.min(Math.ceil(H/b)-1, Math.floor((Math.max(y0,y1)+r)/b));
+    for(let by=by0; by<=by1; by++)
+      for(let bx=bx0; bx<=bx1; bx++)
+        if(distToSegment(bx*b+b/2, by*b+b/2, x0,y0,x1,y1) <= r)
+          mctx.fillRect(bx*b, by*b, b, b);
+  }else{
+    mctx.strokeStyle = '#fff';
+    mctx.lineWidth = S.brush;
+    mctx.lineCap = 'round'; mctx.lineJoin = 'round';
+    mctx.beginPath(); mctx.moveTo(x0,y0); mctx.lineTo(x1,y1); mctx.stroke();
+  }
+  composite(box);
+}
+function distToSegment(px,py, x0,y0, x1,y1){
+  const dx = x1-x0, dy = y1-y0, len = dx*dx + dy*dy;
+  const t = Math.max(0, Math.min(1, len ? ((px-x0)*dx + (py-y0)*dy)/len : 0));
+  return Math.hypot(px-(x0+t*dx), py-(y0+t*dy));
+}
+
+/* ---------- 矩形 ---------- */
+function fillRectArea(x,y,w,h){
+  if(S.effect === 'mosaic'){   // グリッドに合わせて広げる
+    const b = S.strength;
+    const x2 = Math.ceil((x+w)/b)*b, y2 = Math.ceil((y+h)/b)*b;
+    x = Math.floor(x/b)*b; y = Math.floor(y/b)*b; w = x2-x; h = y2-y;
+  }
+  const box = expandDirty(x,y,w,h);
+  if(!box) return;
+  mctx.fillStyle = '#fff';
+  mctx.fillRect(x,y,w,h);
+  composite(box);
+}
+
+/* ---------- ポインタ操作（描画 / パン / ピンチ） ---------- */
+const ptrs = new Map();          // 画面に触れている全ポインタ
+let gesture = null;              // 2本指ジェスチャの基準
+let pan = null;                  // Space / 中ボタンでのパン
+let spaceHeld = false;
+
+function toImage(e){
+  const b = view.getBoundingClientRect();
+  return { x:(e.clientX-b.left)/S.zoom, y:(e.clientY-b.top)/S.zoom };
+}
+function twoPointers(){
+  const [a,b] = [...ptrs.values()];
+  return { dist: Math.hypot(a.x-b.x, a.y-b.y), cx:(a.x+b.x)/2, cy:(a.y+b.y)/2 };
+}
+
+view.addEventListener('pointerdown', e => {
+  if(!S.loaded) return;
+  ptrs.set(e.pointerId, {x:e.clientX, y:e.clientY});
+  try{ view.setPointerCapture(e.pointerId); }catch(_){ /* 捕捉できなくても描画は続行 */ }
+
+  if(ptrs.size >= 2){                       // 2本指 → 描画をやめて移動・拡大へ
+    cancelOp(); pan = null;
+    const g = twoPointers();
+    gesture = {dist:g.dist, cx:g.cx, cy:g.cy, zoom:S.zoom};
+    return;
+  }
+  if(e.button === 1 || spaceHeld){          // 中ボタン / Space+ドラッグ → パン
+    e.preventDefault();
+    pan = {x:e.clientX, y:e.clientY};
+    $('stage').classList.add('panning');
+    return;
+  }
+  if(e.button !== 0) return;
+
+  const p = toImage(e);
+  S.drawing = true; S.lastX = p.x; S.lastY = p.y;
+  beginOp();
+  if(S.tool === 'brush') strokeSegment(p.x,p.y,p.x,p.y);
+  else S.rect = {x:p.x, y:p.y, w:0, h:0, ox:p.x, oy:p.y};
+  render();
+});
+
+view.addEventListener('pointermove', e => {
+  if(!S.loaded) return;
+  if(ptrs.has(e.pointerId)) ptrs.set(e.pointerId, {x:e.clientX, y:e.clientY});
+
+  if(gesture && ptrs.size >= 2){
+    const g = twoPointers();
+    const st = $('stage');
+    if(gesture.dist > 12) zoomAt(gesture.zoom * (g.dist/gesture.dist), g.cx, g.cy);
+    st.scrollLeft -= g.cx - gesture.cx;
+    st.scrollTop  -= g.cy - gesture.cy;
+    gesture.cx = g.cx; gesture.cy = g.cy;
+    return;
+  }
+  if(pan){
+    const st = $('stage');
+    st.scrollLeft -= e.clientX - pan.x;
+    st.scrollTop  -= e.clientY - pan.y;
+    pan = {x:e.clientX, y:e.clientY};
+    return;
+  }
+
+  const p = toImage(e);
+  S.hover = p;
+  if(S.drawing){
+    if(S.tool === 'brush'){
+      strokeSegment(S.lastX, S.lastY, p.x, p.y);
+      S.lastX = p.x; S.lastY = p.y;
+    }else{
+      const r = S.rect;
+      r.x = Math.min(r.ox, p.x); r.y = Math.min(r.oy, p.y);
+      r.w = Math.abs(p.x-r.ox);  r.h = Math.abs(p.y-r.oy);
+    }
+  }
+  render();
+});
+
+function endPointer(e){
+  ptrs.delete(e.pointerId);
+  if(ptrs.size < 2) gesture = null;
+  if(pan && ptrs.size === 0){ pan = null; $('stage').classList.remove('panning'); }
+  if(!S.drawing) return;
+  S.drawing = false;
+  if(S.tool === 'rect' && S.rect){
+    const r = S.rect;
+    if(r.w > 1 && r.h > 1){
+      fillRectArea(r.x, r.y, r.w, r.h);
+      // 他の画像へ複製できるよう、矩形の加工だけは内容を記録しておく
+      if(items[cur]) items[cur].rectOps.push({effect:S.effect, strength:S.strength, x:r.x, y:r.y, w:r.w, h:r.h});
+    }
+    S.rect = null;
+  }
+  endOp(); render();
+}
+view.addEventListener('pointerup', endPointer);
+view.addEventListener('pointercancel', e => { ptrs.delete(e.pointerId); if(ptrs.size<2) gesture=null; cancelOp(); });
+view.addEventListener('pointerleave', () => { S.hover = null; render(); });
+view.addEventListener('contextmenu', e => e.preventDefault());
+
+$('stage').addEventListener('wheel', e => {
+  if(!S.loaded || !(e.ctrlKey || e.metaKey)) return;
+  e.preventDefault();
+  zoomAt(S.zoom * (e.deltaY < 0 ? 1.12 : 1/1.12), e.clientX, e.clientY);
+}, {passive:false});
+
+/* ---------- 履歴 ---------- */
+function undo(){
+  const op = history.undo.pop(); if(!op) return;
+  wctx.putImageData(op.before, op.x, op.y);
+  history.redo.push(op); syncUI(); render();
+}
+function redo(){
+  const op = history.redo.pop(); if(!op) return;
+  wctx.putImageData(op.after, op.x, op.y);
+  history.undo.push(op); syncUI(); render();
+}
+
+/* =========================================================
+   可逆モザイク
+   ---------------------------------------------------------
+   保存時：隠した領域の「原画ピクセル」を1枚のPNGにまとめ、
+           AES-GCM で暗号化して PNG のカスタムチャンクに同梱する。
+           見た目はただのモザイク画像。
+   復元時：チャンクを取り出し、パスワードで復号して貼り戻す。
+   ========================================================= */
+const CHUNK_TYPE = 'msKd';                       // 私用・付随・コピー可 のPNGチャンク
+const MAGIC = new Uint8Array([0x4D,0x4F,0x53,0x41,0x49,0x43,0x52,0x31]); // "MOSAICR1"
+const PBKDF2_ITER = 600000;   // 実測で約80ms。体感に影響しないので OWASP 推奨値まで上げている
+
+const b64 = u8 => { let s=''; for(const b of u8) s += String.fromCharCode(b); return btoa(s); };
+const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+
+/* --- CRC32（PNGチャンクとZIPの両方で使う） --- */
+const CRC_TABLE = (()=>{
+  const t = new Uint32Array(256);
+  for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c = (c&1) ? (0xEDB88320 ^ (c>>>1)) : (c>>>1); t[n]=c>>>0; }
+  return t;
+})();
+function crc32(bytes){
+  let c = 0xFFFFFFFF;
+  for(let i=0;i<bytes.length;i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c>>>8);
+  return (c ^ 0xFFFFFFFF)>>>0;
+}
+
+/* --- PNG チャンク操作 --- */
+function isPng(buf){
+  const u = new Uint8Array(buf, 0, Math.min(8, buf.byteLength));
+  return u.length===8 && u[0]===0x89 && u[1]===0x50 && u[2]===0x4E && u[3]===0x47;
+}
+function eachChunk(buf, fn){
+  const u8 = new Uint8Array(buf), dv = new DataView(buf);
+  let p = 8;
+  while(p + 8 <= u8.length){
+    const len = dv.getUint32(p);
+    const type = String.fromCharCode(u8[p+4],u8[p+5],u8[p+6],u8[p+7]);
+    if(fn(type, p, len) === false) return;
+    if(type === 'IEND') return;
+    p += 12 + len;
+  }
+}
+function findPngChunk(buf, type){
+  let found = null;
+  eachChunk(buf, (t, p, len) => {
+    if(t === type){ found = new Uint8Array(buf.slice(p+8, p+8+len)); return false; }
+  });
+  return found;
+}
+function insertPngChunk(buf, type, data){
+  const u8 = new Uint8Array(buf);
+  let iend = -1;
+  eachChunk(buf, (t, p) => { if(t === 'IEND'){ iend = p; return false; } });
+  if(iend < 0) throw new Error('PNGの構造を解析できませんでした');
+
+  const chunk = new Uint8Array(12 + data.length);
+  const dv = new DataView(chunk.buffer);
+  dv.setUint32(0, data.length);
+  for(let i=0;i<4;i++) chunk[4+i] = type.charCodeAt(i);
+  chunk.set(data, 8);
+  const crcIn = new Uint8Array(4 + data.length);
+  for(let i=0;i<4;i++) crcIn[i] = type.charCodeAt(i);
+  crcIn.set(data, 4);
+  dv.setUint32(8 + data.length, crc32(crcIn));
+
+  const out = new Uint8Array(u8.length + chunk.length);
+  out.set(u8.subarray(0, iend), 0);
+  out.set(chunk, iend);
+  out.set(u8.subarray(iend), iend + chunk.length);
+  return out;
+}
+
+/* --- 暗号 --- */
+async function deriveKey(pw, salt, iter){
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    {name:'PBKDF2', salt, iterations:iter || PBKDF2_ITER, hash:'SHA-256'},
+    base, {name:'AES-GCM', length:256}, false, ['encrypt','decrypt']);
+}
+
+/* --- 復元対象の領域（履歴由来ぶんは Undo と自動的に同期する） --- */
+function protectedRegions(){
+  const rects = (S.committedRegions || []).map(r => ({...r})).concat(
+    history.undo.filter(o => o.protect)
+                .map(o => ({x:o.x, y:o.y, w:o.before.width, h:o.before.height})));
+  let merged = true;
+  while(merged){
+    merged = false;
+    outer:
+    for(let i=0;i<rects.length;i++)
+      for(let j=i+1;j<rects.length;j++){
+        const a = rects[i], b = rects[j];
+        if(a.x < b.x+b.w && b.x < a.x+a.w && a.y < b.y+b.h && b.y < a.y+a.h){
+          const x = Math.min(a.x,b.x), y = Math.min(a.y,b.y);
+          rects[i] = { x, y,
+            w: Math.max(a.x+a.w, b.x+b.w) - x,
+            h: Math.max(a.y+a.h, b.y+b.h) - y };
+          rects.splice(j,1); merged = true; break outer;
+        }
+      }
+  }
+  return rects;
+}
+
+/* 鍵導出は意図的に重い（PBKDF2 25万回）。一括保存では1回だけ導出し、
+   画像ごとに別のIVを使って使い回す（AES-GCMはIVが毎回異なれば安全）。 */
+async function makeKeyCache(pw){
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  return {salt, key: await deriveKey(pw, salt)};
+}
+
+/* --- 復元データの生成 --- */
+async function buildPayload(pw, keyCache){
+  const regions = protectedRegions();
+  if(!regions.length) return null;
+
+  // 原画の該当領域を縦に並べた1枚のパッチ画像にまとめる
+  const pw_ = Math.max(...regions.map(r => r.w));
+  const ph_ = regions.reduce((s,r) => s + r.h, 0);
+  const patch = mk(pw_, ph_), pc = patch.getContext('2d');
+  const layout = [];
+  let y = 0;
+  for(const r of regions){
+    pc.drawImage(orig, r.x, r.y, r.w, r.h, 0, y, r.w, r.h);
+    layout.push({x:r.x, y:r.y, w:r.w, h:r.h, py:y});
+    y += r.h;
+  }
+  const patchBytes = new Uint8Array(await new Promise(res =>
+    patch.toBlob(b => b.arrayBuffer().then(res), 'image/png')));
+
+  // [4byte layoutLen][layout JSON][patch PNG] をまとめて暗号化
+  const layoutJson = new TextEncoder().encode(JSON.stringify(layout));
+  const plain = new Uint8Array(4 + layoutJson.length + patchBytes.length);
+  new DataView(plain.buffer).setUint32(0, layoutJson.length);
+  plain.set(layoutJson, 4);
+  plain.set(patchBytes, 4 + layoutJson.length);
+
+  const kc   = keyCache || await makeKeyCache(pw);
+  const salt = kc.salt;
+  const iv   = crypto.getRandomValues(new Uint8Array(12));
+  const ct   = new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM', iv}, kc.key, plain));
+
+  const header = new TextEncoder().encode(JSON.stringify({
+    v:1, w:W, h:H, salt:b64(salt), iv:b64(iv),
+    kdf:'PBKDF2-SHA256', iter:PBKDF2_ITER, alg:'AES-GCM-256'
+  }));
+
+  const out = new Uint8Array(MAGIC.length + 4 + header.length + ct.length);
+  out.set(MAGIC, 0);
+  new DataView(out.buffer).setUint32(MAGIC.length, header.length);
+  out.set(header, MAGIC.length + 4);
+  out.set(ct, MAGIC.length + 4 + header.length);
+  return {bytes: out, count: regions.length};
+}
+
+/* --- 復元データの解読 --- */
+async function openPayload(bytes, pw){
+  for(let i=0;i<MAGIC.length;i++)
+    if(bytes[i] !== MAGIC[i]) throw new Error('復元データの形式が違います');
+
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const hLen = dv.getUint32(MAGIC.length);
+  const header = JSON.parse(new TextDecoder().decode(bytes.subarray(MAGIC.length+4, MAGIC.length+4+hLen)));
+  if(header.w !== W || header.h !== H)
+    throw new Error(`画像サイズが違います（データは ${header.w}×${header.h}、現在は ${W}×${H}）。リサイズや切り抜きをした画像は復元できません。`);
+
+  // 反復回数はヘッダから読む。将来値を変えても古いファイルを開けるようにするため
+  const key = await deriveKey(pw, unb64(header.salt), header.iter || 250000);
+  let plain;
+  try{
+    plain = new Uint8Array(await crypto.subtle.decrypt(
+      {name:'AES-GCM', iv:unb64(header.iv)}, key, bytes.subarray(MAGIC.length+4+hLen)));
+  }catch(_){
+    throw new Error('パスワードが違うか、データが壊れています。');
+  }
+
+  const pdv = new DataView(plain.buffer);
+  const lLen = pdv.getUint32(0);
+  const layout = JSON.parse(new TextDecoder().decode(plain.subarray(4, 4+lLen)));
+  const url = URL.createObjectURL(new Blob([plain.subarray(4+lLen)], {type:'image/png'}));
+  const img = await new Promise((res, rej) => {
+    const i = new Image();
+    i.onload = () => res(i); i.onerror = () => rej(new Error('パッチ画像を復号できませんでした'));
+    i.src = url;
+  });
+  URL.revokeObjectURL(url);
+  return {img, layout};
+}
+
+/* --- 復元の実行 --- */
+async function doRestore(){
+  if(!hasCrypto()) return;
+  const bytes = S.embedded || await pickKeyFile();
+  if(!bytes){ toast('復元データが見つかりませんでした。', 'warn'); return; }
+  const pw = $('pw').value || prompt('復元用のパスワードを入力してください') || '';
+  if(!pw) return;
+
+  busy(true); busyText('復号しています…');
+  try{
+    await new Promise(r => setTimeout(r, 30));   // スピナーを描画させる
+    const {img, layout} = await openPayload(bytes, pw);
+
+    S.sctx.clearRect(0,0,W,H); S.sctx.drawImage(work,0,0);
+    S.dirty = null; S.opProtect = false;
+    for(const r of layout){
+      expandDirty(r.x, r.y, r.w, r.h);
+      wctx.drawImage(img, 0, r.py, r.w, r.h, r.x, r.y, r.w, r.h);
+      octx.drawImage(img, 0, r.py, r.w, r.h, r.x, r.y, r.w, r.h); // 消しゴムの基準も更新
+    }
+    endOp(); render();
+    busy(false);
+    toast(`復元しました（${layout.length}箇所）。`, 'good');
+  }catch(e){
+    busy(false);
+    toast(e.message, 'bad', 5200);
+  }
+}
+function pickKeyFile(){
+  return new Promise(res => {
+    const inp = $('keyfile');
+    inp.onchange = async () => {
+      const f = inp.files[0]; inp.value = '';
+      res(f ? new Uint8Array(await f.arrayBuffer()) : null);
+    };
+    inp.click();
+  });
+}
+function hasCrypto(){
+  if(window.crypto && crypto.subtle) return true;
+  toast('この環境では暗号化機能が使えません。\nファイルを直接開くか、https / localhost で開いてください。', 'bad', 6000);
+  return false;
+}
+
+/* =========================================================
+   ZIP 書き出し（無圧縮 store。PNG/JPEGは既に圧縮済みなので十分）
+   ========================================================= */
+function makeZip(files){          // [{name, bytes}]
+  const enc = new TextEncoder();
+  const parts = [], central = [];
+  let offset = 0;
+  for(const f of files){
+    const nm = enc.encode(f.name);
+    const crc = crc32(f.bytes);
+    const local = new Uint8Array(30 + nm.length);
+    const lv = new DataView(local.buffer);
+    lv.setUint32(0, 0x04034b50, true);
+    lv.setUint16(4, 20, true);
+    lv.setUint16(6, 0x0800, true);        // ファイル名は UTF-8
+    lv.setUint16(8, 0, true);             // 0 = 無圧縮
+    lv.setUint32(14, crc, true);
+    lv.setUint32(18, f.bytes.length, true);
+    lv.setUint32(22, f.bytes.length, true);
+    lv.setUint16(26, nm.length, true);
+    local.set(nm, 30);
+    parts.push(local, f.bytes);
+
+    const cen = new Uint8Array(46 + nm.length);
+    const cv = new DataView(cen.buffer);
+    cv.setUint32(0, 0x02014b50, true);
+    cv.setUint16(4, 20, true); cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0x0800, true); cv.setUint16(10, 0, true);
+    cv.setUint32(16, crc, true);
+    cv.setUint32(20, f.bytes.length, true);
+    cv.setUint32(24, f.bytes.length, true);
+    cv.setUint16(28, nm.length, true);
+    cv.setUint32(42, offset, true);
+    cen.set(nm, 46);
+    central.push(cen);
+
+    offset += local.length + f.bytes.length;
+  }
+  const cenSize = central.reduce((s,c) => s + c.length, 0);
+  const end = new Uint8Array(22);
+  const ev = new DataView(end.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(8, files.length, true);
+  ev.setUint16(10, files.length, true);
+  ev.setUint32(12, cenSize, true);
+  ev.setUint32(16, offset, true);
+  return new Blob([...parts, ...central, end], {type:'application/zip'});
+}
+
+/* ---------- 保存 ---------- */
+function download(blobOrBytes, filename, type){
+  const blob = blobOrBytes instanceof Blob ? blobOrBytes : new Blob([blobOrBytes], {type});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+/* 表示中の画像を、設定どおりのバイト列にする */
+async function currentBytes(pw, keyCache){
+  const reversible = $('reversible').checked;
+  const regions = reversible ? protectedRegions() : [];
+  if(reversible && regions.length && pw){
+    const payload = await buildPayload(pw, keyCache);
+    const png = new Uint8Array(await new Promise(res =>
+      work.toBlob(b => b.arrayBuffer().then(res), 'image/png')));
+    return {bytes: insertPngChunk(png.buffer, CHUNK_TYPE, payload.bytes), ext:'png', payload};
+  }
+  const fmt = reversible ? 'png' : $('format').value;
+  const bytes = new Uint8Array(await new Promise(res =>
+    work.toBlob(b => b.arrayBuffer().then(res), fmt==='png'?'image/png':'image/jpeg', 0.9)));
+  return {bytes, ext: fmt==='png'?'png':'jpg', payload:null};
+}
+
+/* 可逆モードの入力チェック。OKならパスワード、不要なら '' 、中止なら null */
+function reversiblePassword(anyRegions){
+  if(!$('reversible').checked) return '';
+  if(!anyRegions){
+    return confirm('可逆モードがONですが、まだ隠した箇所がありません。\nこのまま通常保存しますか？') ? '' : null;
+  }
+  const pw = $('pw').value, pw2 = $('pw2').value;
+  if(pw.length < 4){ toast('パスワードは4文字以上で入力してください。', 'warn'); $('pw').focus(); return null; }
+  if(pw !== pw2){ toast('確認用パスワードが一致しません。', 'warn'); $('pw2').focus(); return null; }
+  if(!hasCrypto()) return null;
+  return pw;
+}
+
+async function save(){
+  if(!S.loaded) return;
+  const pw = reversiblePassword(protectedRegions().length > 0);
+  if(pw === null) return;
+
+  busy(!!pw); if(pw) busyText('暗号化しています…');
+  try{
+    if(pw) await new Promise(r => setTimeout(r, 30));
+    const {bytes, ext, payload} = await currentBytes(pw);
+    download(bytes, `${S.name}_mosaic.${ext}`, ext==='png'?'image/png':'image/jpeg');
+    if(payload && $('sidecar').checked)
+      download(payload.bytes, `${S.name}_mosaic.mkey`, 'application/octet-stream');
+    busy(false);
+    toast(payload
+      ? `保存しました。\n復元データ ${payload.count}箇所 / ${(payload.bytes.length/1024).toFixed(0)} KB を同梱。`
+      : `保存しました（${(bytes.length/1024).toFixed(0)} KB）。Exifは削除済みです。`, 'good');
+  }catch(e){
+    busy(false); toast('保存に失敗しました：' + e.message, 'bad', 5000);
+  }
+}
+
+async function saveAll(){
+  if(items.length < 2) return save();
+  await commitCurrent();
+
+  // 1枚でも保護領域があればパスワードを要求する
+  let any = false;
+  for(const it of items) if(it.regions && it.regions.length) any = true;
+  const pw = reversiblePassword(any);
+  if(pw === null) return;
+
+  const back = cur;
+  const used = new Set();
+  const out = [];
+  busy(true);
+  try{
+    let keyCache = null;
+    if(pw){ busyText('鍵を作成しています…'); await new Promise(r => setTimeout(r,30)); keyCache = await makeKeyCache(pw); }
+    for(let i=0;i<items.length;i++){
+      busyText(`書き出しています… ${i+1} / ${items.length}`);
+      await new Promise(r => setTimeout(r, 0));
+      await switchTo(i, true);
+      const {bytes, ext} = await currentBytes(pw, keyCache);
+      let base = items[i].name.replace(/\.[^.]+$/,'') + '_mosaic';
+      let name = `${base}.${ext}`, n = 2;
+      while(used.has(name)) name = `${base}_${n++}.${ext}`;
+      used.add(name);
+      out.push({name, bytes});
+    }
+    await switchTo(back, true);
+    busy(false);
+    download(makeZip(out), 'mosaic_images.zip');
+    toast(`${out.length}枚をZIPで保存しました。`, 'good');
+  }catch(e){
+    busy(false); toast('一括保存に失敗しました：' + e.message, 'bad', 5000);
+  }
+}
+
+/* =========================================================
+   顔の自動検出（pico.js / MIT / Copyright (c) 2013 Nenad Markus）
+   vendor/ が無い環境でも本体は動くよう、全て任意扱いにしている。
+   ========================================================= */
+const FACE_LEVELS = [
+  {label:'とても甘い', q:2},
+  {label:'甘い',       q:5},
+  {label:'標準',       q:12},
+  {label:'厳しい',     q:25},
+  {label:'とても厳しい', q:45}
+];
+let faceClassifier = null;
+
+function faceReady(){
+  if(faceClassifier) return true;
+  if(typeof pico === 'undefined' || !window.PICO_CASCADE_B64) return false;
+  try{
+    const u8 = unb64(window.PICO_CASCADE_B64);
+    faceClassifier = pico.unpack_cascade(new Int8Array(u8.buffer, u8.byteOffset, u8.byteLength));
+    return true;
+  }catch(_){ return false; }
+}
+
+/* 顔は「原画」から探す。既にモザイクを掛けた後だと検出できなくなるため。 */
+function detectFaces(src, w, h, qthresh){
+  const d = src.getContext('2d').getImageData(0,0,w,h).data;
+  const gray = new Uint8Array(w*h);
+  for(let i=0, p=0; i<gray.length; i++, p+=4)
+    gray[i] = (2*d[p] + 7*d[p+1] + d[p+2]) / 10;
+
+  const raw = pico.run_cascade(
+    {pixels:gray, nrows:h, ncols:w, ldim:w}, faceClassifier,
+    { shiftfactor:0.1,
+      minsize: Math.max(20, Math.round(Math.min(w,h)*0.04)),
+      maxsize: Math.min(w,h),
+      scalefactor:1.1 });
+  return pico.cluster_detections(raw, 0.2).filter(x => x[3] > qthresh);
+}
+
+/* 検出結果を、いま選ばれている効果で隠す（顔の輪郭ぶん少し広げる） */
+function applyFaceDetections(dets){
+  if(!dets.length) return 0;
+  beginOp();
+  for(const [r, c, s] of dets){
+    const pad = s * 0.18;
+    const x = c - s/2 - pad, y = r - s/2 - pad, wd = s + pad*2, ht = s + pad*2;
+    fillRectArea(x, y, wd, ht);
+    if(items[cur]) items[cur].rectOps.push({effect:S.effect, strength:S.strength, x, y, w:wd, h:ht});
+  }
+  endOp(); render();
+  return dets.length;
+}
+
+async function hideFaces(){
+  if(!S.loaded) return;
+  if(!faceReady()){ toast('顔検出データを読み込めませんでした。\nnode tools/fetch-pico.js を実行してください。', 'bad', 6000); return; }
+  busy(true); busyText('顔を探しています…');
+  try{
+    await new Promise(r => setTimeout(r, 30));
+    const n = applyFaceDetections(detectFaces(orig, W, H, FACE_LEVELS[+$('faceSens').value].q));
+    busy(false);
+    toast(n ? `${n}箇所を隠しました。取りこぼしは手動で追加してください。`
+            : '顔を検出できませんでした。\n「検出の厳しさ」を甘くするか、手動で隠してください。',
+          n ? 'good' : 'warn', 4600);
+  }catch(e){ busy(false); toast('顔検出に失敗しました：' + e.message, 'bad', 5000); }
+}
+
+async function hideFacesAll(){
+  if(items.length < 2) return hideFaces();
+  if(!faceReady()){ toast('顔検出データを読み込めませんでした。\nnode tools/fetch-pico.js を実行してください。', 'bad', 6000); return; }
+  if(!confirm(`${items.length}枚すべてで顔を検出し、いまの効果で隠します。\nよろしいですか？`)) return;
+
+  await commitCurrent();
+  const back = cur, q = FACE_LEVELS[+$('faceSens').value].q;
+  let total = 0, none = 0;
+  busy(true);
+  try{
+    for(let i=0;i<items.length;i++){
+      busyText(`顔を探しています… ${i+1} / ${items.length}`);
+      await new Promise(r => setTimeout(r, 0));
+      await switchTo(i, true);
+      const n = applyFaceDetections(detectFaces(orig, W, H, q));
+      if(n) { total += n; await commitCurrent(); } else none++;
+    }
+    await switchTo(back, true);
+    busy(false);
+    toast(`${items.length-none}枚で計${total}箇所を隠しました。`
+      + (none ? `\n${none}枚は顔を検出できませんでした。` : ''), total ? 'good' : 'warn', 5200);
+  }catch(e){ busy(false); toast('一括検出に失敗しました：' + e.message, 'bad', 5000); }
+}
+
+/* ---------- 矩形加工の複製 ---------- */
+async function applyRectsToAll(){
+  const src = items[cur];
+  if(!src || !src.rectOps.length){ toast('矩形ツールでの加工がまだありません。', 'warn'); return; }
+  if(!confirm(`矩形での加工 ${src.rectOps.length}件 を、同じサイズの他の画像へ同じ座標で適用します。\nよろしいですか？`)) return;
+
+  await commitCurrent();
+  const ops = src.rectOps.slice(), sw = W, sh = H, back = cur;
+  const savedE = S.effect, savedS = S.strength;
+  let done = 0, skipped = 0;
+  busy(true);
+  try{
+    for(let i=0;i<items.length;i++){
+      if(i === back) continue;
+      busyText(`複製しています… ${i+1} / ${items.length}`);
+      await new Promise(r => setTimeout(r, 0));
+      await switchTo(i, true);
+      if(W !== sw || H !== sh){ skipped++; continue; }
+      for(const o of ops){
+        S.effect = o.effect; S.strength = o.strength;
+        beginOp(); fillRectArea(o.x, o.y, o.w, o.h); endOp();
+        items[i].rectOps.push({...o});
+      }
+      await commitCurrent();
+      done++;
+    }
+    S.effect = savedE; S.strength = savedS;
+    await switchTo(back, true);
+    busy(false);
+    toast(`${done}枚に適用しました。` + (skipped ? `\nサイズが違う ${skipped}枚は対象外です。` : ''), done ? 'good' : 'warn', 4600);
+  }catch(e){
+    S.effect = savedE; S.strength = savedS;
+    busy(false); toast('複製に失敗しました：' + e.message, 'bad', 5000);
+  }
+}
+
+/* ---------- UI ---------- */
+function syncUI(){
+  const L = S.loaded;
+  ['undo','redo','reset','save','peek','applyAll','zoomIn','zoomOut','zoomFit','zoom100']
+    .forEach(id => $(id).disabled = !L);
+  $('undo').disabled = !L || !history.undo.length;
+  $('redo').disabled = !L || !history.redo.length;
+  $('restore').disabled = !L;
+  $('saveAll').disabled = items.length < 2;
+  $('applyRectsToAll').disabled = !L || !items[cur] || !items[cur].rectOps.length;
+
+  const faceOk = typeof pico !== 'undefined' && !!window.PICO_CASCADE_B64;
+  $('hideFaces').disabled = !L || !faceOk;
+  $('hideFacesAll').disabled = items.length < 2 || !faceOk;
+  $('faceSens').disabled = !faceOk;
+  $('faceSensVal').textContent = FACE_LEVELS[+$('faceSens').value].label;
+  if(!faceOk) $('faceNote').textContent =
+    '顔検出データが見つかりません。mosaic-tool で node tools/fetch-pico.js を実行すると有効になります。';
+
+  const mosaic = S.effect==='mosaic', blur = S.effect==='blur';
+  $('strengthLabel').textContent = mosaic ? 'ブロックサイズ' : blur ? 'ぼかしの強さ' : '（この効果では未使用）';
+  $('strengthVal').textContent   = mosaic ? S.strength+' px' : blur ? Math.round(S.strength/2)+' px' : '—';
+  $('strength').disabled = !(mosaic || blur);
+  $('brushRow').style.opacity = S.tool==='brush' ? 1 : .4;
+  $('brush').disabled = S.tool !== 'brush';
+  $('brushVal').textContent = S.brush+' px';
+
+  const rev = $('reversible').checked;
+  $('revBody').classList.toggle('open', rev);
+  if(rev){ $('format').value = 'png'; $('format').disabled = true; }
+  else   { $('format').disabled = false; }
+
+  $('embedded').classList.toggle('on', !!S.embedded);
+  $('restoreNote').textContent = !L
+    ? '画像を読み込むと状態を判定します。'
+    : S.embedded
+      ? 'この画像に復元データが見つかりました。パスワードを入れて実行してください。'
+      : '復元データは見つかりませんでした。.mkey ファイルがある場合は実行後に選択できます。';
+
+  $('autoShrink').checked = shrinkPrefs.on;
+  $('shrinkMax').value = shrinkPrefs.max;
+  $('shrinkVal').textContent = shrinkPrefs.max + ' px';
+  $('shrinkRow').style.opacity = shrinkPrefs.on ? 1 : .4;
+  $('shrinkMax').disabled = !shrinkPrefs.on;
+
+  const n = rev ? protectedRegions().length : 0;
+  const it = items[cur];
+  const shrunk = it && it.dims && it.dims.shrunk ? `（元 ${it.src.w}×${it.src.h}）` : '';
+  $('info').textContent = L
+    ? `${W} × ${H} px${shrunk} ／ 表示 ${Math.round(S.zoom*100)}% ／ 操作 ${history.undo.length} 件`
+      + (rev ? ` ／ 復元対象 ${n}箇所` : '')
+    : '画像が読み込まれていません';
+}
+
+$('tools').addEventListener('click', e => {
+  const b = e.target.closest('button'); if(!b) return;
+  S.tool = b.dataset.tool;
+  [...$('tools').children].forEach(x => x.classList.toggle('on', x===b));
+  syncUI(); render();
+});
+$('effects').addEventListener('click', e => {
+  const b = e.target.closest('button'); if(!b) return;
+  S.effect = b.dataset.effect;
+  [...$('effects').children].forEach(x => x.classList.toggle('on', x===b));
+  syncUI();
+});
+$('strength').addEventListener('input', e => { S.strength = +e.target.value; syncUI(); });
+$('brush').addEventListener('input', e => { S.brush = +e.target.value; syncUI(); render(); });
+$('reversible').addEventListener('change', syncUI);
+$('autoShrink').addEventListener('change', e => {
+  shrinkPrefs.on = e.target.checked; saveShrinkPrefs(); syncUI();
+  if(items.length) toast('この設定は次に読み込む画像から反映されます。', 'info', 3200);
+});
+$('shrinkMax').addEventListener('input', e => {
+  shrinkPrefs.max = +e.target.value; saveShrinkPrefs(); syncUI();
+});
+$('pwToggle').onclick = () => {
+  const on = $('pw').type === 'password';
+  $('pw').type = $('pw2').type = on ? 'text' : 'password';
+  $('pwToggle').textContent = on ? '🙈' : '👁';
+};
+
+$('file').addEventListener('change', e => { addFiles(e.target.files); e.target.value=''; });
+$('undo').onclick = undo;
+$('redo').onclick = redo;
+$('restore').onclick = doRestore;
+$('save').onclick = save;
+$('saveAll').onclick = saveAll;
+$('applyRectsToAll').onclick = applyRectsToAll;
+$('hideFaces').onclick = hideFaces;
+$('hideFacesAll').onclick = hideFacesAll;
+$('faceSens').addEventListener('input', syncUI);
+$('removeItem').onclick = async () => {
+  if(items.length < 2) return;
+  if(!confirm(`「${items[cur].name}」を一覧から外します。この画像の加工は失われます。`)) return;
+  items.splice(cur, 1);
+  await switchTo(Math.min(cur, items.length-1), true);
+};
+$('reset').onclick = () => {
+  if(!confirm('すべての加工を取り消して元の画像に戻します。よろしいですか？')) return;
+  beginOp(); S.opProtect = false;
+  expandDirty(0,0,W,H);
+  wctx.clearRect(0,0,W,H); wctx.drawImage(orig,0,0);
+  endOp();
+  if(items[cur]){ items[cur].rectOps.length = 0; items[cur].regions = []; }
+  S.committedRegions = [];
+  render();
+};
+$('applyAll').onclick = () => {
+  beginOp();
+  fillRectArea(0,0,W,H);
+  if(items[cur]) items[cur].rectOps.push({effect:S.effect, strength:S.strength, x:0, y:0, w:W, h:H});
+  endOp(); render();
+};
+$('zoomIn').onclick  = () => setZoom(S.zoom*1.25);
+$('zoomOut').onclick = () => setZoom(S.zoom/1.25);
+$('zoomFit').onclick = fitZoom;
+$('zoom100').onclick = () => setZoom(1);
+
+/* 原画チラ見（押している間だけ） */
+const peekOn  = () => { if(S.loaded && !S.peek){ S.peek = true;  render(); } };
+const peekOff = () => { if(S.peek){ S.peek = false; render(); } };
+$('peek').addEventListener('pointerdown', peekOn);
+['pointerup','pointerleave','pointercancel'].forEach(t => $('peek').addEventListener(t, peekOff));
+
+/* ---------- 入力（D&D / ペースト / キー） ---------- */
+['dragenter','dragover'].forEach(t => document.addEventListener(t, e => {
+  e.preventDefault(); document.body.classList.add('dragover');
+}));
+['dragleave','drop'].forEach(t => document.addEventListener(t, e => {
+  e.preventDefault(); document.body.classList.remove('dragover');
+}));
+document.addEventListener('drop', e => addFiles(e.dataTransfer.files));
+document.addEventListener('paste', e => {
+  const fs = [...e.clipboardData.items].filter(i => i.type.startsWith('image/')).map(i => i.getAsFile());
+  if(fs.length) addFiles(fs);
+});
+
+document.addEventListener('keydown', e => {
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
+  const ctrl = e.ctrlKey || e.metaKey;
+  if(ctrl && e.key.toLowerCase()==='s'){ e.preventDefault(); (e.shiftKey ? saveAll : save)(); return; }
+  if(typing) return;
+  if(ctrl && e.key.toLowerCase()==='z'){ e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+  if(ctrl && e.key.toLowerCase()==='y'){ e.preventDefault(); redo(); return; }
+  if(ctrl) return;
+  if(e.code === 'Space'){ e.preventDefault(); spaceHeld = true; return; }
+  if(e.key === 'ArrowLeft'  && items.length>1){ e.preventDefault(); switchTo((cur-1+items.length)%items.length); return; }
+  if(e.key === 'ArrowRight' && items.length>1){ e.preventDefault(); switchTo((cur+1)%items.length); return; }
+  if(e.key==='['){ $('brush').value = S.brush = Math.max(8, S.brush-10); syncUI(); render(); }
+  if(e.key===']'){ $('brush').value = S.brush = Math.min(400, S.brush+10); syncUI(); render(); }
+  if(e.key.toLowerCase()==='b') $('tools').children[0].click();
+  if(e.key.toLowerCase()==='r') $('tools').children[1].click();
+  if(e.key.toLowerCase()==='p' && !e.repeat) peekOn();
+});
+document.addEventListener('keyup', e => {
+  if(e.code === 'Space'){ spaceHeld = false; if(pan){ pan=null; $('stage').classList.remove('panning'); } }
+  if(e.key.toLowerCase()==='p') peekOff();
+});
+window.addEventListener('blur', () => { spaceHeld = false; peekOff(); });
+
+window.addEventListener('beforeunload', e => {
+  if(history.undo.length || items.some(i => i.edited)){ e.preventDefault(); e.returnValue=''; }
+});
+
+/* ---------- PWA ---------- */
+if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js')
+      .then(() => $('offline').classList.add('on'))
+      .catch(() => {});
+  });
+}
+let deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault(); deferredPrompt = e;
+  $('install').classList.add('on');
+});
+$('install').onclick = async () => {
+  if(!deferredPrompt) return;
+  deferredPrompt.prompt();
+  await deferredPrompt.userChoice;
+  deferredPrompt = null;
+  $('install').classList.remove('on');
+};
+window.addEventListener('appinstalled', () => {
+  $('install').classList.remove('on');
+  toast('インストールしました。オフラインでも使えます。', 'good');
+});
+/* インストール済みアプリで画像ファイルを直接開いたとき */
+if('launchQueue' in window){
+  launchQueue.setConsumer(async p => {
+    if(p.files && p.files.length){
+      const fs = [];
+      for(const h of p.files) fs.push(await h.getFile());
+      addFiles(fs);
+    }
+  });
+}
+
+syncUI();
+</script>
+</body>
+</html>
